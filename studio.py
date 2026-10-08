@@ -12,7 +12,8 @@ def read_layer(path):
   if not path.with_suffix(suffix).is_file():raise ValueError('Missing companion: '+suffix)
  crs=CRS.from_wkt(path.with_suffix('.prj').read_text())
  convert=Transformer.from_crs(crs,4326,always_xy=True).transform
- with shapefile.Reader(str(path)) as reader:
+ encoding=path.with_suffix('.cpg').read_text().strip() if path.with_suffix('.cpg').exists() else 'utf-8'
+ with shapefile.Reader(str(path),encoding=encoding) as reader:
   fields=[f[0] for f in reader.fields[1:]];features=[]
   for record in reader.iterShapeRecords():
    g=shape(record.shape.__geo_interface__)
@@ -30,7 +31,7 @@ def load_zip(data):
    for info in infos:
     if info.is_dir():continue
     p=Path(info.filename)
-    if p.name!=info.filename or p.suffix.lower() not in ['.shp','.shx','.dbf','.prj','.cpg']:raise ValueError('ZIP must contain only root-level shapefile components')
+    if p.name!=info.filename or p.suffix.lower() not in ['.shp','.shx','.dbf','.prj','.cpg','.sbn','.sbx']:raise ValueError('ZIP must contain only root-level shapefile components')
     (Path(folder)/p.name).write_bytes(z.read(info))
   paths=sorted(Path(folder).glob('*.shp'))
   if not paths:raise ValueError('No .shp in ZIP')
@@ -49,12 +50,12 @@ def study(layers,boundary_name):
  area=transform(to_metric,boundary);rows=[];uncovered=[]
  for name,poly in polygons.items():
   if name==boundary_name:continue
-  clipped=area.intersection(transform(to_metric,poly));percent=100*clipped.area/area.area
+  clipped=transform(to_metric,boundary.intersection(poly));percent=100*clipped.area/area.area
   rows.append({'layer':name,'geometry_type':poly.geom_type,'area_ha':clipped.area/10000,'coverage_percent':percent,'clipped_length_m':clipped.length if poly.geom_type in ['LineString','MultiLineString'] else None,'points_inside':sum(area.covers(transform(to_metric,shape(f['geometry']))) for f in layers[name]['features']) if poly.geom_type=='Point' else (sum(area.covers(p) for p in transform(to_metric,poly).geoms) if poly.geom_type=='MultiPoint' else None)})
   if clipped.is_empty:uncovered.append(name)
  from shapely.strtree import STRtree
  names=[n for n in polygons if n!=boundary_name]
- clipped=[area.intersection(transform(to_metric,polygons[n])) for n in names]
+ clipped=[transform(to_metric,boundary.intersection(polygons[n])) for n in names]
  tree=STRtree(clipped);pairs=[];candidates=0
  for i,g in enumerate(clipped):
   for j in tree.query(g,predicate='intersects'):

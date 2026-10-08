@@ -44,3 +44,12 @@ Gera `output/evolution-report.json`, `map-evolved.html`, `integration-package.js
 
 ## Próximas etapas restantes
 Validar CRS e comparabilidade temporal em dados autorizados, calibrar resistência por espécie/contexto, importar GeoTIFF georreferenciado e implementar receptor autenticado do contrato na aplicação BiomaData. Não existe avaliação com arquivos de clientes nesta publicação.
+
+## Interpretação de limites territoriais
+
+```bash
+python territory.py /caminho/arquivos.zip --output output/territory
+```
+Aceita índices auxiliares `.sbn`/`.sbx` e codificação `.cpg`. Reconhece campos `CD_MUN`/`NM_MUN` como limites municipais e `Bioma` como limite de bioma (sugestões pendentes de revisão). Gera camadas GeoJSON por fonte, município dentro/fora do Cerrado e união municipal, mapa geral e mapa municipal, tabela CSV e relatório com áreas elipsoidais WGS84. O resultado preserva atributos e sinaliza caracteres de substituição já presentes nos textos. Não inventa classes de uso do solo ou datas.
+
+As áreas continentais são medidas elipsoidalmente; o estudo UTM recorta outras camadas pelo limite regional antes de reprojetar. O comando territorial foi verificado com um conjunto fornecido de seis limites (Cerrado e cinco municípios de Goiás). Os arquivos e resultados deste conjunto ficam locais; não são incluídos no repositório público.

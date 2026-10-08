@@ -3,6 +3,7 @@ from pathlib import Path
 import streamlit as st
 import streamlit.components.v1 as components
 from studio import load_zip,read_geojson,study,build_map
+from territory import understand
 from advanced import temporal,review_registry,least_cost,export_contract,route_svg
 st.set_page_config(page_title='BiomaData Shapefile Studio',layout='wide')
 st.title('BiomaData — Shapefile Studio')
@@ -22,7 +23,12 @@ if source or geo:
    if name in layers:raise ValueError('Nome de camada duplicado: '+name)
    layers[name]=read_geojson(json.loads(file.getvalue()))
   names=list(layers)
-  boundary=st.selectbox('Camada poligonal limite da área de estudo',names)
+  if st.button('Interpretar limites e gerar camadas territoriais'):
+   territorial,derived=understand(layers);st.json(territorial)
+   components.html(build_map({**layers,**derived}),height=600)
+   st.download_button('Baixar camadas geradas GeoJSON',json.dumps(derived,ensure_ascii=False),file_name='derived-layers.json')
+  default=next((i for i,name in enumerate(names) if any('CD_MUN' in f.get('properties',{}) for f in layers[name]['features'])),0)
+  boundary=st.selectbox('Camada poligonal limite da área de estudo',names,index=default)
   visible=st.multiselect('Camadas do mapa',names,default=names)
   if visible:components.html(build_map({n:layers[n] for n in visible}),height=550)
   st.subheader('Categorias revisadas')
