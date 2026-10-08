@@ -16,7 +16,7 @@ def read_layer(path):
   fields=[f[0] for f in reader.fields[1:]];features=[]
   for record in reader.iterShapeRecords():
    g=shape(record.shape.__geo_interface__)
-   if g.is_empty or not g.is_valid or g.geom_type not in ['Polygon','MultiPolygon']:raise ValueError('Valid polygon features required')
+   if g.is_empty or not g.is_valid or g.geom_type not in ['Polygon','MultiPolygon','Point','MultiPoint','LineString','MultiLineString']:raise ValueError('Valid point, line or polygon features required')
    g=transform(convert,g)
    if not (-180<=g.bounds[0]<=g.bounds[2]<=180 and -90<=g.bounds[1]<=g.bounds[3]<=90):raise ValueError('Invalid geographic coordinates')
    features.append({'type':'Feature','geometry':mapping(g),'properties':dict(zip(fields,list(record.record)))})
@@ -40,7 +40,7 @@ def study(layers,boundary_name):
  if boundary_name not in layers:raise ValueError('Select an analysis boundary')
  polygons={name:unary_union([shape(f['geometry']) for f in data['features']]) for name,data in layers.items()}
  boundary=polygons[boundary_name]
- if boundary.is_empty or boundary.area<=0:raise ValueError('Empty analysis boundary')
+ if boundary.geom_type not in ['Polygon','MultiPolygon'] or boundary.is_empty or boundary.area<=0:raise ValueError('Empty analysis boundary')
  center=boundary.centroid
  if not (-80<center.y<84):raise ValueError('Demo supports UTM latitudes only')
  if boundary.bounds[2]-boundary.bounds[0]>3 or boundary.bounds[3]-boundary.bounds[1]>3:raise ValueError('Use a regional study area; extent exceeds demo limits')
@@ -50,13 +50,18 @@ def study(layers,boundary_name):
  for name,poly in polygons.items():
   if name==boundary_name:continue
   clipped=area.intersection(transform(to_metric,poly));percent=100*clipped.area/area.area
-  rows.append({'layer':name,'area_ha':clipped.area/10000,'coverage_percent':percent})
+  rows.append({'layer':name,'geometry_type':poly.geom_type,'area_ha':clipped.area/10000,'coverage_percent':percent,'clipped_length_m':clipped.length if poly.geom_type in ['LineString','MultiLineString'] else None,'points_inside':sum(area.covers(transform(to_metric,shape(f['geometry']))) for f in layers[name]['features']) if poly.geom_type=='Point' else (sum(area.covers(p) for p in transform(to_metric,poly).geoms) if poly.geom_type=='MultiPoint' else None)})
   if clipped.is_empty:uncovered.append(name)
- pairs=[]
+ from shapely.strtree import STRtree
  names=[n for n in polygons if n!=boundary_name]
- for i,a in enumerate(names):
-  for b in names[i+1:]:pairs.append({'layers':[a,b],'overlap_ha':area.intersection(transform(to_metric,polygons[a])).intersection(transform(to_metric,polygons[b])).area/10000})
- return {'trained_model':False,'method':'deterministic polygon union/intersection; local UTM area','metric_crs':'EPSG:'+str(epsg),'boundary':boundary_name,'boundary_area_ha':area.area/10000,'layers':rows,'pairwise_overlap':pairs,'study_notes':['Layers with no overlap: '+', '.join(uncovered)] if uncovered else ['All thematic layers intersect the study boundary.'],'limitations':['Layer names are user-provided, not inferred land-use classes.','Coverage of separate layers may overlap; percentages must not be added.','No ecological/legal diagnosis or automatic change detection.','Regional planar analysis; projection selection requires review for real projects.']}
+ clipped=[area.intersection(transform(to_metric,polygons[n])) for n in names]
+ tree=STRtree(clipped);pairs=[];candidates=0
+ for i,g in enumerate(clipped):
+  for j in tree.query(g,predicate='intersects'):
+   j=int(j)
+   if j<=i:continue
+   candidates+=1;pairs.append({'layers':[names[i],names[j]],'overlap_ha':g.intersection(clipped[j]).area/10000})
+ return {'trained_model':False,'method':'deterministic polygon union/intersection; local UTM area','metric_crs':'EPSG:'+str(epsg),'spatial_index':{'type':'STRtree','intersecting_pairs':candidates,'possible_pairs':len(names)*(len(names)-1)//2},'boundary':boundary_name,'boundary_area_ha':area.area/10000,'layers':rows,'pairwise_overlap':pairs,'study_notes':['Layers with no overlap: '+', '.join(uncovered)] if uncovered else ['All thematic layers intersect the study boundary.'],'limitations':['Layer names are user-provided, not inferred land-use classes.','Coverage of separate layers may overlap; percentages must not be added.','No ecological/legal diagnosis; temporal comparisons require reviewed dates and comparable layers.','Regional planar analysis; projection selection requires review for real projects.']}
 
 def build_map(layers):
  features=[shape(f['geometry']) for data in layers.values() for f in data['features']]
@@ -68,3 +73,11 @@ def build_map(layers):
   color=colors[i%len(colors)]
   folium.GeoJson(data,name=html.escape(name),style_function=lambda feature,c=color:{'color':c,'fillColor':c,'weight':2,'fillOpacity':.25}).add_to(m)
  folium.LayerControl(collapsed=False).add_to(m);m.fit_bounds([[bounds[1],bounds[0]],[bounds[3],bounds[2]]]);return m.get_root().render()
+
+def read_geojson(data):
+ if data.get('type')!='FeatureCollection' or data.get('crs'):raise ValueError('WGS84 FeatureCollection without legacy CRS required')
+ for feature in data.get('features',[]):
+  g=shape(feature['geometry'])
+  if not g.is_valid or g.is_empty or g.geom_type not in ['Point','MultiPoint','LineString','MultiLineString','Polygon','MultiPolygon']:raise ValueError('Unsupported geometry')
+  if not (-180<=g.bounds[0]<=g.bounds[2]<=180 and -90<=g.bounds[1]<=g.bounds[3]<=90):raise ValueError('Invalid WGS84 coordinates')
+ return data
